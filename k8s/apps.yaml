@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-baseline-1
+  labels:
+    app: sentinel
+    version: baseline1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sentinel
+      version: baseline1
+  template:
+    metadata:
+      labels:
+        app: sentinel
+        version: baseline1
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-baseline-1
+spec:
+  selector:
+    app: sentinel
+    version: baseline1
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30001
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-baseline-2
+  labels:
+    app: sentinel
+    version: baseline2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sentinel
+      version: baseline2
+  template:
+    metadata:
+      labels:
+        app: sentinel
+        version: baseline2
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-baseline-2
+spec:
+  selector:
+    app: sentinel
+    version: baseline2
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30002
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-canary
+  labels:
+    app: sentinel
+    version: canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sentinel
+      version: canary
+  template:
+    metadata:
+      labels:
+        app: sentinel
+        version: canary
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-canary
+spec:
+  selector:
+    app: sentinel
+    version: canary
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30003
+  type: NodePort

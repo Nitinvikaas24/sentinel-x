@@ -1,0 +1,36 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: canary-latency-combined
+  namespace: default
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      version: canary
+  delay:
+    latency: "300ms"
+    correlation: "50"
+    jitter: "50ms"
+  duration: "300s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: canary-loss-combined
+  namespace: default
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      version: canary
+  loss:
+    loss: "10"
+    correlation: "25"
+  duration: "300s"

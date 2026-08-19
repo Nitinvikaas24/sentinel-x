@@ -1,0 +1,17 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: canary-packetloss
+  namespace: default
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      version: canary
+  loss:
+    loss: "10"
+    correlation: "25"
+  duration: "300s"

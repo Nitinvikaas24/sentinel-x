@@ -1,0 +1,102 @@
+name: Sentinel-X CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Judge unit tests ──────────────────────────────────────────────────────
+  test-judge:
+    name: Judge — Statistical & Decision Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install requests scipy pytest pyyaml
+
+      - name: Run unit tests
+        run: pytest tests/ -v --tb=short
+
+  # ── Backend smoke test ────────────────────────────────────────────────────
+  test-backend:
+    name: Backend — API Smoke Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: pip install -r dashboard/backend/requirements.txt pytest
+
+      - name: Start API server (background)
+        run: |
+          cd dashboard/backend
+          python app.py &
+          sleep 3   # give it time to start
+
+      - name: Health check
+        run: |
+          curl -sf http://localhost:5000/ | grep '"status":"ok"'
+
+      - name: Push a test run
+        run: |
+          curl -sf -X POST http://localhost:5000/api/push \
+            -H "Content-Type: application/json" \
+            -d '{"status":"PASS","chaos_mode":"none","baseline_avg":45.2,"canary_avg":46.1,"noise":2.1,"degradation":0.9,"confidence":52.3,"baseline_std":3.1,"canary_std":3.4,"error_rate":0.0,"p95_baseline":51.0,"p99_baseline":58.0,"p95_canary":53.0,"p99_canary":61.0,"reason":"Test run.","eval_seconds":4.2,"n_samples":20,"b1_samples":[],"b2_samples":[],"canary_samples":[]}'
+
+      - name: Verify latest endpoint
+        run: |
+          curl -sf http://localhost:5000/api/latest | grep '"status":"PASS"'
+
+      - name: Verify history endpoint
+        run: |
+          curl -sf "http://localhost:5000/api/history?limit=5" | grep '"total"'
+
+      - name: Verify stats endpoint
+        run: |
+          curl -sf http://localhost:5000/api/stats | grep '"pass_rate"'
+
+  # ── Frontend lint/build ───────────────────────────────────────────────────
+  build-frontend:
+    name: Frontend — Vite Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dashboard/frontend/package.json
+
+      - name: Install dependencies
+        working-directory: dashboard/frontend
+        run: npm install
+
+      - name: Build
+        working-directory: dashboard/frontend
+        run: npm run build
+        env:
+          VITE_API_URL: https://sentinel-x-api.onrender.com

@@ -1,0 +1,31 @@
+# Sentinel-X v4.1 — Central Configuration
+# All pipeline thresholds and settings live here.
+# Edit this file; no code changes needed.
+
+evaluation:
+  samples: 20              # probe samples per service per run
+  timeout_s: 5.0           # per-request HTTP probe timeout (seconds)
+  retry_max: 2             # max retry attempts on non-PASS result
+  retry_backoff_base_s: 10 # exponential backoff base; doubles each retry, capped at 60s
+
+thresholds:
+  noise_warn_ms: 30        # advisory — log warning if A1 vs A2 differ by this
+  noise_fail_ms: 50        # INCONCLUSIVE if baseline noise exceeds this
+  degradation_fail_ms: 80  # FAIL if canary mean latency increase exceeds this
+  degradation_crit_ms: 300 # CRITICAL FAIL if canary degradation exceeds this
+  error_rate_fail_pct: 5.0 # FAIL if canary error rate (%) exceeds this
+  canary_std_fail_ms: 80   # FAIL if canary standard deviation exceeds this (instability)
+  confidence_warn_pct: 70  # advisory — warn if statistical confidence drops below this
+  cohens_d_large: 0.8      # Cohen's d threshold for "large" effect size
+
+chaos:
+  stabilise_wait_s: 15     # seconds to wait after chaos injection before probing
+
+notifications:
+  # POST the full result JSON to this URL on FAIL or CRITICAL FAIL.
+  # Leave empty to disable.
+  webhook_url: ""
+  webhook_on:
+    - FAIL
+    - CRITICAL FAIL
+  webhook_timeout_s: 10
