@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API = import.meta.env.VITE_API_URL || "https://sentinel-x-v4.onrender.com";
 
 /* ── Status config ─────────────────────────────────────────────────────────── */
 const STATUS_CFG = {
@@ -204,148 +204,127 @@ function VDivider() {
    PROJECT INFO BANNER
    ══════════════════════════════════════════════════════════════════════════════ */
 function InfoBanner({ connected }) {
-  const [open, setOpen] = useState(true);
+  const [open,    setOpen]    = useState(true);
+  const [runOpen, setRunOpen] = useState(false);
+
   return (
     <div style={{ marginBottom: 16 }}>
-      {/* Header row */}
+
+      {/* ── Header ── */}
       <div
         onClick={() => setOpen(o => !o)}
         style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 20px", cursor: "pointer",
+          padding: "12px 20px", cursor: "pointer", userSelect: "none",
           background: "#0d0d1a", border: "1px solid #1c1c2e",
           borderLeft: "3px solid #00aaff",
-          userSelect: "none",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <span style={{ fontSize: 9, letterSpacing: 3, color: "#00aaff", textTransform: "uppercase", fontFamily: "'Space Grotesk',sans-serif" }}>
             About This Project
           </span>
+          <span style={{ fontSize: 9, letterSpacing: 2, color: "#2a2a4e", fontFamily: "'JetBrains Mono',monospace" }}>
+            — Nitin Vikaas
+          </span>
         </div>
-        <span style={{ fontSize: 11, color: "#2a2a4e", fontFamily: "'JetBrains Mono',monospace" }}>{open ? "▲ collapse" : "▼ expand"}</span>
+        <span style={{ fontSize: 10, color: "#2a2a4e", fontFamily: "'JetBrains Mono',monospace" }}>
+          {open ? "▲ collapse" : "▼ expand"}
+        </span>
       </div>
 
       {open && (
         <div style={{
           background: "#0a0a14", border: "1px solid #1c1c2e", borderTop: "none",
-          borderLeft: "3px solid #00aaff", padding: "22px 24px",
+          borderLeft: "3px solid #00aaff", padding: "26px 28px",
+          display: "flex", flexDirection: "column", gap: 22,
         }}>
 
-          {/* Two-column layout */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}>
-
-            {/* Left: What is this */}
-            <div>
-              <div style={{ fontSize: 9, letterSpacing: 3, color: "#2a2a4e", textTransform: "uppercase", fontFamily: "'Space Grotesk',sans-serif", marginBottom: 10 }}>
-                What Is Sentinel-X?
-              </div>
-              <p style={{ fontSize: 13, color: "#8a8ab0", lineHeight: 1.8, fontFamily: "'Space Grotesk',sans-serif", margin: 0 }}>
-                Sentinel-X is a <span style={{ color: "#d4d4f0", fontWeight: 600 }}>Kubernetes-native chaos engineering pipeline</span> that automatically
-                validates canary deployments using statistical analysis. It deploys three service
-                variants — two stable baselines and one new canary — injects real network faults
-                via Chaos Mesh, then uses <span style={{ color: "#d4d4f0", fontWeight: 600 }}>Mann-Whitney U</span> and{" "}
-                <span style={{ color: "#d4d4f0", fontWeight: 600 }}>Cohen's d</span> to decide:
-                promote the canary, or roll it back. No human judgment needed.
-              </p>
-              <p style={{ fontSize: 12, color: "#6a6a8e", lineHeight: 1.7, fontFamily: "'Space Grotesk',sans-serif", marginTop: 10, marginBottom: 0 }}>
-                The A/A/B design (two baselines) is what separates this from a basic A/B test — it
-                measures environment stability before trusting any result. If the two baselines differ
-                by more than 50ms from each other, the environment itself is noisy and the system
-                returns <span style={{ color: "#ffcc00" }}>INCONCLUSIVE</span> rather than a misleading answer.
-              </p>
-
-              {/* Tech chips */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 14 }}>
-                {[
-                  ["Kubernetes",    "#00aaff"],
-                  ["Chaos Mesh",    "#ff6622"],
-                  ["Python",        "#3572a5"],
-                  ["Flask + SSE",   "#2a2a4e"],
-                  ["React + Vite",  "#61dafb"],
-                  ["SQLite WAL",    "#2a2a4e"],
-                  ["Mann-Whitney U","#00ff88"],
-                  ["Cohen's d",     "#00ff88"],
-                  ["Prometheus",    "#e6522c"],
-                  ["CI / GitHub Actions","#2a2a4e"],
-                ].map(([l, c]) => <Chip key={l} label={l} color={c} />)}
-              </div>
+          {/* ── What is it ── */}
+          <div>
+            <div style={{ fontSize: 9, letterSpacing: 3, color: "#2a2a4e", textTransform: "uppercase", fontFamily: "'Space Grotesk',sans-serif", marginBottom: 12 }}>
+              What Is Sentinel-X?
             </div>
-
-            {/* Right: Why offline + how to run */}
-            <div>
-              <div style={{ fontSize: 9, letterSpacing: 3, color: "#2a2a4e", textTransform: "uppercase", fontFamily: "'Space Grotesk',sans-serif", marginBottom: 10 }}>
-                Why Is It Not Updating Live?
-              </div>
-              <div style={{
-                background: "#13131f", border: "1px solid #ffcc0030",
-                borderLeft: "3px solid #ffcc00", padding: "14px 16px", marginBottom: 16,
-              }}>
-                <p style={{ fontSize: 12, color: "#8a8080", lineHeight: 1.7, fontFamily: "'Space Grotesk',sans-serif", margin: 0 }}>
-                  The pipeline runs on a <span style={{ color: "#ffcc00", fontWeight: 600 }}>local Kubernetes cluster (minikube)</span> — it
-                  cannot run in the cloud without a paid Kubernetes service (EKS, GKE). The dashboard
-                  shows all historical runs pushed from the local pipeline. To see it update live,
-                  the pipeline must be running on the developer's machine.
-                </p>
-              </div>
-
-              <div style={{ fontSize: 9, letterSpacing: 3, color: "#2a2a4e", textTransform: "uppercase", fontFamily: "'Space Grotesk',sans-serif", marginBottom: 10 }}>
-                How to Generate Live Data
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {[
-                  ["1", "Start Docker Desktop + minikube start",      "#00aaff"],
-                  ["2", "Start the Flask API:  python app.py",        "#00aaff"],
-                  ["3", "python pipeline.py --chaos latency",          "#00ff88"],
-                  ["4", "Watch this dashboard update in real time",    "#00ff88"],
-                ].map(([n, text, c]) => (
-                  <div key={n} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                    <div style={{
-                      width: 18, height: 18, border: `1px solid ${c}`, color: c,
-                      fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center",
-                      justifyContent: "center", flexShrink: 0,
-                      fontFamily: "'JetBrains Mono',monospace",
-                    }}>{n}</div>
-                    <span style={{ fontSize: 12, color: "#6a6a9e", fontFamily: "'JetBrains Mono',monospace", paddingTop: 2 }}>{text}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{
-                marginTop: 14, padding: "10px 14px",
-                background: "#0d0d1a", border: "1px solid #1c1c2e",
-                fontSize: 11, color: "#4a4a6e", fontFamily: "'Space Grotesk',sans-serif",
-              }}>
-                💡 The SSE connection above shows <span style={{ color: connected ? "#00ff88" : "#ff2244" }}>{connected ? "LIVE" : "OFFLINE"}</span> —
-                when the Flask API is running locally and the pipeline pushes a result,
-                this dashboard updates within milliseconds, no page refresh needed.
-              </div>
-            </div>
+            <p style={{ fontSize: 13, color: "#8a8ab0", lineHeight: 1.9, fontFamily: "'Space Grotesk',sans-serif", margin: "0 0 10px 0", maxWidth: 860 }}>
+              A self-built <span style={{ color: "#d4d4f0", fontWeight: 600 }}>chaos engineering and canary deployment gate</span> — designed to solve how companies like Netflix, Google, and Amazon ship code safely without downtime. It deploys three service variants (two stable baselines + one canary), injects real network faults at the Kubernetes kernel level via Chaos Mesh, then uses{" "}
+              <span style={{ color: "#d4d4f0", fontWeight: 600 }}>Mann-Whitney U + Cohen's d</span> to make a statistically-backed promote-or-rollback decision automatically.
+            </p>
+            <p style={{ fontSize: 12, color: "#5a5a7e", lineHeight: 1.8, fontFamily: "'Space Grotesk',sans-serif", margin: 0, maxWidth: 860 }}>
+              The A/A/B design — two baselines, not one — is the key differentiator. It measures environment stability before trusting any signal. If the baselines themselves diverge by more than 50ms, the system returns{" "}
+              <span style={{ color: "#ffcc00" }}>INCONCLUSIVE</span> rather than a false answer.
+            </p>
           </div>
 
-          {/* Pipeline flow */}
-          <div style={{ marginTop: 24, borderTop: "1px solid #1c1c2e", paddingTop: 20 }}>
-            <div style={{ fontSize: 9, letterSpacing: 3, color: "#2a2a4e", textTransform: "uppercase", fontFamily: "'Space Grotesk',sans-serif", marginBottom: 14 }}>
-              Pipeline Flow — What Happens When You Run pipeline.py
+          {/* ── Tech stack ── */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {[
+              ["Kubernetes",       "#00aaff"],
+              ["Chaos Mesh",       "#ff6622"],
+              ["Python",           "#3572a5"],
+              ["Flask + SSE",      "#4a4a7e"],
+              ["React + Vite",     "#61dafb"],
+              ["SQLite WAL",       "#4a4a7e"],
+              ["Mann-Whitney U",   "#00ff88"],
+              ["Cohen's d",        "#00ff88"],
+              ["Prometheus",       "#e6522c"],
+              ["GitHub Actions CI","#4a4a7e"],
+            ].map(([l, c]) => <Chip key={l} label={l} color={c} />)}
+          </div>
+
+          {/* ── Why offline ── */}
+          <div style={{
+            background: "#13131f", border: "1px solid #ffcc0025",
+            borderLeft: "3px solid #ffcc00", padding: "16px 20px",
+          }}>
+            <div style={{ fontSize: 9, letterSpacing: 3, color: "#ffcc0070", textTransform: "uppercase", fontFamily: "'Space Grotesk',sans-serif", marginBottom: 9 }}>
+              Why Is It Not Updating Live?
+            </div>
+            <p style={{ fontSize: 12, color: "#7a7060", lineHeight: 1.8, fontFamily: "'Space Grotesk',sans-serif", margin: 0, maxWidth: 860 }}>
+              The pipeline runs on a <span style={{ color: "#ffcc00", fontWeight: 600 }}>local Kubernetes cluster (minikube)</span> because it injects real network-layer faults — this cannot be replicated on a free cloud VM. The Flask API is live on Render; pipeline results are pushed here after each local run via the <code style={{ color: "#ffcc0070", fontSize: 11 }}>SENTINEL_API</code> env var. This is intentional architecture, not a limitation. SSE status:{" "}
+              <span style={{ color: connected ? "#00ff88" : "#ff2244", fontWeight: 600 }}>{connected ? "LIVE" : "OFFLINE"}</span>
+              {!connected && <span style={{ color: "#4a4a5e" }}> — pipeline not running locally</span>}.
+            </p>
+            <div
+              onClick={() => setRunOpen(o => !o)}
+              style={{ marginTop: 12, cursor: "pointer", fontSize: 10, color: "#4a4a5e", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 1, display: "inline-block" }}
+            >
+              {runOpen ? "▲" : "▼"} run it locally
+            </div>
+            {runOpen && (
+              <div style={{
+                marginTop: 10, padding: "12px 16px",
+                background: "#0d0d1a", borderLeft: "2px solid #1c1c2e",
+                fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: "#4a6a8e", lineHeight: 2.2,
+              }}>
+                <div style={{ color: "#2a2a4e" }}># prerequisites: Docker Desktop + minikube</div>
+                <div>minikube start</div>
+                <div>python3.11 pipeline.py --chaos latency</div>
+                <div style={{ color: "#2a2a4e" }}># results push to this dashboard in real time</div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Pipeline flow ── */}
+          <div>
+            <div style={{ fontSize: 9, letterSpacing: 3, color: "#2a2a4e", textTransform: "uppercase", fontFamily: "'Space Grotesk',sans-serif", marginBottom: 12 }}>
+              Pipeline Flow
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 0 }}>
               {[
-                { n: "01", title: "DEPLOY",        color: "#00aaff", desc: "3 Kubernetes pods launched: baseline-1, baseline-2, canary. Each is a Docker container running a version of your service." },
-                { n: "02", title: "INJECT CHAOS",  color: "#ff6622", desc: "Chaos Mesh adds real network faults to the canary pod: 200ms latency, 10% packet loss, or both — at the Linux kernel level." },
-                { n: "03", title: "EVALUATE",      color: "#ffcc00", desc: "20 HTTP probes sent to each service. Mann-Whitney U + Cohen's d + P95/P99 analysis run on the latency samples." },
-                { n: "04", title: "DECIDE",        color: "#00ff88", desc: "PASS → promote canary. FAIL → rollback. INCONCLUSIVE → environment too noisy, retry with backoff." },
+                { n: "01", title: "DEPLOY",       color: "#00aaff", desc: "3 Kubernetes pods launched: two stable baselines and one canary release candidate." },
+                { n: "02", title: "INJECT CHAOS", color: "#ff6622", desc: "Chaos Mesh applies real network faults to the canary at the Linux kernel level." },
+                { n: "03", title: "EVALUATE",     color: "#ffcc00", desc: "20 HTTP probes per service. Mann-Whitney U + Cohen's d + P95/P99 computed." },
+                { n: "04", title: "DECIDE",       color: "#00ff88", desc: "PASS → promote. FAIL → rollback. INCONCLUSIVE → retry with exponential backoff." },
               ].map((step, i) => (
                 <div key={step.n} style={{
-                  padding: "16px 18px",
-                  borderLeft: i === 0 ? `3px solid ${step.color}` : `1px solid #1c1c2e`,
-                  borderTop: "1px solid #1c1c2e",
+                  padding: "16px 18px", background: "#0d0d1a", position: "relative",
+                  borderLeft:   i === 0 ? `3px solid ${step.color}` : "1px solid #1c1c2e",
+                  borderTop:    "1px solid #1c1c2e",
                   borderBottom: "1px solid #1c1c2e",
-                  borderRight: i === 3 ? "1px solid #1c1c2e" : "none",
-                  background: "#0d0d1a",
-                  position: "relative",
+                  borderRight:  i === 3 ? "1px solid #1c1c2e" : "none",
                 }}>
-                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: step.color, marginBottom: 6, letterSpacing: 2 }}>{step.n}</div>
-                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 700, color: step.color, marginBottom: 8 }}>{step.title}</div>
+                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: step.color, letterSpacing: 2, marginBottom: 6 }}>{step.n}</div>
+                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, fontWeight: 700, color: step.color, marginBottom: 8 }}>{step.title}</div>
                   <div style={{ fontSize: 11, color: "#4a4a6e", lineHeight: 1.65, fontFamily: "'Space Grotesk',sans-serif" }}>{step.desc}</div>
                   {i < 3 && (
                     <div style={{ position: "absolute", right: -10, top: "50%", transform: "translateY(-50%)", color: "#2a2a4e", fontSize: 14, zIndex: 1 }}>→</div>
@@ -354,6 +333,7 @@ function InfoBanner({ connected }) {
               ))}
             </div>
           </div>
+
         </div>
       )}
     </div>
