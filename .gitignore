@@ -7,3 +7,5 @@ dist/
 .env
 .env.local
 sentinel.db
+dashboard/backend/jobs/
+results/

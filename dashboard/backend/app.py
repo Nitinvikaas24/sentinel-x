@@ -13,19 +13,36 @@ import functools
 import json
 import os
 import queue
+import re
 import sqlite3
 import threading
 import time
+import uuid
+import zipfile
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, expose_headers=["Content-Type"])
 
-DB      = os.environ.get("DB_PATH", str(Path(__file__).parent / "sentinel.db"))
-API_KEY = os.environ.get("SENTINEL_API_KEY", "")
+DB         = os.environ.get("DB_PATH", str(Path(__file__).parent / "sentinel.db"))
+API_KEY    = os.environ.get("SENTINEL_API_KEY", "")
+UPLOAD_KEY = os.environ.get("SENTINEL_UPLOAD_KEY", "")   # optional gate on /api/jobs uploads
+RUNNER_KEY = os.environ.get("SENTINEL_RUNNER_KEY", "")   # required for runner endpoints
+JOBS_DIR   = Path(os.environ.get("JOBS_DIR", str(Path(__file__).parent / "jobs")))
+SAMPLES    = Path(__file__).parent / "samples"
+MAX_ZIP_MB = 25
+MAX_QUEUED = 5
+CHAOS_MODES = ("none", "latency", "packetloss", "combined")
+SAMPLE_JOBS = {
+    "good": {"file": "good-service.zip", "name": "Sample: healthy service"},
+    "slow": {"file": "slow-service.zip", "name": "Sample: slow service (regression)"},
+}
+JOBS_DIR.mkdir(parents=True, exist_ok=True)
+app.config["MAX_CONTENT_LENGTH"] = (2 * MAX_ZIP_MB + 5) * 1024 * 1024
+_runner_seen = {"t": 0.0}
 
 
 # ── SSE subscriber bus (thread-safe) ─────────────────────────────────────────
@@ -102,6 +119,23 @@ def _init() -> None:
             canary_samples TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT,
+            status     TEXT DEFAULT 'queued',
+            chaos_mode TEXT DEFAULT 'latency',
+            port       INTEGER DEFAULT 8080,
+            health     TEXT DEFAULT '/',
+            canary     TEXT,
+            baseline   TEXT,
+            run_id     INTEGER,
+            log        TEXT DEFAULT '',
+            error      TEXT,
+            created    REAL,
+            updated    REAL
+        )
+    """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON runs(timestamp)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_status    ON runs(status)")
     conn.commit()
@@ -119,6 +153,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "cohens_d":     "REAL DEFAULT 0",
         "eval_seconds": "REAL DEFAULT 0",
         "n_samples":    "INTEGER DEFAULT 10",
+        "service":      "TEXT",
     }
     for col, typedef in new_cols.items():
         if col not in existing:
@@ -241,7 +276,11 @@ def push():
         return jsonify({"error": "request body must be JSON"}), 400
     if not data.get("status"):
         return jsonify({"error": "'status' field is required"}), 400
+    return jsonify({"saved": True, "id": _insert_run(data)})
 
+
+def _insert_run(data: dict) -> int:
+    """Store one evaluation result, broadcast it to SSE clients, return its id."""
     conn = _connect()
     conn.execute("""
         INSERT INTO runs (
@@ -250,8 +289,8 @@ def push():
             baseline_std, canary_std, error_rate,
             p95_baseline, p99_baseline, p95_canary, p99_canary, cohens_d,
             status, reason, eval_seconds, n_samples,
-            b1_samples, b2_samples, canary_samples
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            b1_samples, b2_samples, canary_samples, service
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         data.get("timestamp", time.strftime("%Y-%m-%dT%H:%M:%S")),
         data.get("chaos_mode", "none"),
@@ -268,15 +307,261 @@ def push():
         json.dumps(data.get("b1_samples", [])),
         json.dumps(data.get("b2_samples", [])),
         json.dumps(data.get("canary_samples", [])),
+        data.get("service"),
     ))
     conn.commit()
     run_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.close()
 
-    saved = {**data, "id": run_id}
-    _broadcast(saved)   # push to all SSE subscribers
+    _broadcast({**data, "id": run_id})   # push to all SSE subscribers
+    return run_id
 
-    return jsonify({"saved": True, "id": run_id})
+
+# ── Jobs: bring-your-own-service ─────────────────────────────────────────────
+# Flow: user uploads a zip containing a Dockerfile → job is queued here → a
+# runner agent on a machine with minikube claims it, builds, deploys, injects
+# chaos, evaluates, and posts the result back via /api/runner/*.
+
+def require_upload_key(fn):
+    @functools.wraps(fn)
+    def _wrap(*args, **kwargs):
+        if UPLOAD_KEY and request.headers.get("X-Upload-Key") != UPLOAD_KEY:
+            return jsonify({"error": "invalid or missing access key"}), 401
+        return fn(*args, **kwargs)
+    return _wrap
+
+
+def require_runner(fn):
+    @functools.wraps(fn)
+    def _wrap(*args, **kwargs):
+        if not RUNNER_KEY:
+            return jsonify({"error": "runner access is not configured on this server"}), 503
+        if request.headers.get("X-Runner-Key") != RUNNER_KEY:
+            return jsonify({"error": "unauthorized"}), 401
+        _runner_seen["t"] = time.time()
+        return fn(*args, **kwargs)
+    return _wrap
+
+
+def _job_public(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["has_baseline"] = bool(d.pop("baseline"))
+    d.pop("canary", None)
+    return d
+
+
+def _job_event(job_id: int) -> None:
+    conn = _connect()
+    row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    conn.close()
+    if row:
+        _broadcast({"event": "job", **_job_public(row)})
+
+
+def _is_zip(path: Path) -> bool:
+    try:
+        with zipfile.ZipFile(path) as z:
+            return z.testzip() is None and len(z.namelist()) > 0
+    except zipfile.BadZipFile:
+        return False
+
+
+def _create_job(name: str, chaos: str, port: int, health: str, canary: Path, baseline: Path | None) -> int:
+    conn = _connect()
+    if conn.execute("SELECT COUNT(*) FROM jobs WHERE status='queued'").fetchone()[0] >= MAX_QUEUED:
+        conn.close()
+        raise OverflowError("queue is full — wait for a running test to finish")
+    now = time.time()
+    cur = conn.execute(
+        "INSERT INTO jobs (name, chaos_mode, port, health, canary, baseline, created, updated) VALUES (?,?,?,?,?,?,?,?)",
+        (name, chaos, port, health, str(canary) if canary else None, str(baseline) if baseline else None, now, now),
+    )
+    conn.commit()
+    job_id = cur.lastrowid
+    conn.close()
+    return job_id
+
+
+def _save_zip(field: str, tag: str) -> Path | None:
+    f = request.files.get(field)
+    if not f or not f.filename:
+        return None
+    tmp = JOBS_DIR / f"upload_{uuid.uuid4().hex}.zip"
+    f.save(tmp)
+    if tmp.stat().st_size > MAX_ZIP_MB * 1024 * 1024 or not _is_zip(tmp):
+        tmp.unlink(missing_ok=True)
+        raise ValueError(f"{field}: must be a valid .zip under {MAX_ZIP_MB} MB")
+    return tmp
+
+
+def _clean_form():
+    name  = re.sub(r"[^\w .\-()]", "", (request.form.get("name") or "My service"))[:60].strip() or "My service"
+    chaos = request.form.get("chaos", "latency")
+    if chaos not in CHAOS_MODES:
+        raise ValueError(f"chaos must be one of {', '.join(CHAOS_MODES)}")
+    try:
+        port = int(request.form.get("port", "8080"))
+    except ValueError:
+        raise ValueError("port must be a number")
+    if not 1 <= port <= 65535:
+        raise ValueError("port must be between 1 and 65535")
+    health = request.form.get("health", "/") or "/"
+    if not re.fullmatch(r"/[A-Za-z0-9_\-./]*", health):
+        raise ValueError("health path must start with / and use simple characters")
+    return name, chaos, port, health
+
+
+@app.route("/api/jobs", methods=["POST"])
+@require_upload_key
+def create_job():
+    canary = baseline = None
+    try:
+        name, chaos, port, health = _clean_form()
+        canary = _save_zip("canary", "canary")
+        if canary is None:
+            return jsonify({"error": "canary: a .zip containing a Dockerfile is required"}), 400
+        baseline = _save_zip("baseline", "baseline")
+        job_id = _create_job(name, chaos, port, health, canary, baseline)
+    except ValueError as exc:
+        for p in (canary, baseline):
+            if p: p.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 400
+    except OverflowError as exc:
+        for p in (canary, baseline):
+            if p: p.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 429
+    _job_event(job_id)
+    return jsonify({"queued": True, "id": job_id}), 201
+
+
+@app.route("/api/jobs/sample", methods=["POST"])
+def create_sample_job():
+    body   = request.get_json(silent=True) or {}
+    key    = body.get("sample", "good")
+    sample = SAMPLE_JOBS.get(key)
+    if not sample or not (SAMPLES / sample["file"]).exists():
+        return jsonify({"error": f"unknown sample '{key}'"}), 400
+    chaos = body.get("chaos", "none")
+    if chaos not in CHAOS_MODES:
+        return jsonify({"error": "invalid chaos mode"}), 400
+    dest = JOBS_DIR / f"upload_{uuid.uuid4().hex}.zip"
+    dest.write_bytes((SAMPLES / sample["file"]).read_bytes())
+    baseline = None
+    if key == "slow":   # baseline = the healthy version, canary = the regressed one
+        baseline = JOBS_DIR / f"upload_{uuid.uuid4().hex}.zip"
+        baseline.write_bytes((SAMPLES / SAMPLE_JOBS["good"]["file"]).read_bytes())
+    try:
+        job_id = _create_job(sample["name"], chaos, 8080, "/", dest, baseline)
+    except OverflowError as exc:
+        dest.unlink(missing_ok=True)
+        if baseline: baseline.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 429
+    _job_event(job_id)
+    return jsonify({"queued": True, "id": job_id}), 201
+
+
+@app.route("/api/jobs")
+def list_jobs():
+    limit = min(int(request.args.get("limit", "20")), 100)
+    conn  = _connect()
+    rows  = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    return jsonify({"jobs": [_job_public(r) for r in rows]})
+
+
+@app.route("/api/jobs/<int:job_id>")
+def job_detail(job_id: int):
+    conn = _connect()
+    row  = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    conn.close()
+    return jsonify(_job_public(row)) if row else (jsonify({"error": "not found"}), 404)
+
+
+@app.route("/api/runner")
+def runner_status():
+    age = time.time() - _runner_seen["t"] if _runner_seen["t"] else None
+    return jsonify({"online": age is not None and age < 30, "seconds_since_seen": None if age is None else round(age)})
+
+
+@app.route("/api/runner/claim", methods=["POST"])
+@require_runner
+def runner_claim():
+    conn = _connect()
+    row = conn.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"job": None})
+    conn.execute("UPDATE jobs SET status='building', updated=? WHERE id=? AND status='queued'", (time.time(), row["id"]))
+    conn.commit()
+    conn.close()
+    _job_event(row["id"])
+    return jsonify({"job": {
+        "id": row["id"], "name": row["name"], "chaos_mode": row["chaos_mode"],
+        "port": row["port"], "health": row["health"], "has_baseline": bool(row["baseline"]),
+    }})
+
+
+@app.route("/api/runner/jobs/<int:job_id>/artifact/<role>")
+@require_runner
+def runner_artifact(job_id: int, role: str):
+    if role not in ("canary", "baseline"):
+        return jsonify({"error": "bad role"}), 400
+    conn = _connect()
+    row = conn.execute(f"SELECT {role} FROM jobs WHERE id=?", (job_id,)).fetchone()
+    conn.close()
+    if not row or not row[0] or not Path(row[0]).exists():
+        return jsonify({"error": "not found"}), 404
+    return Response(Path(row[0]).read_bytes(), mimetype="application/zip")
+
+
+@app.route("/api/runner/jobs/<int:job_id>/update", methods=["POST"])
+@require_runner
+def runner_update(job_id: int):
+    body = request.get_json(silent=True) or {}
+    status, line, error = body.get("status"), body.get("log"), body.get("error")
+    conn = _connect()
+    row = conn.execute("SELECT log FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "not found"}), 404
+    log = (row["log"] or "") + (f"{line}\n" if line else "")
+    conn.execute(
+        "UPDATE jobs SET status=COALESCE(?, status), log=?, error=COALESCE(?, error), updated=? WHERE id=?",
+        (status, log[-8000:], (error or "")[:1000] or None, time.time(), job_id),
+    )
+    conn.commit()
+    conn.close()
+    _job_event(job_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/runner/jobs/<int:job_id>/complete", methods=["POST"])
+@require_runner
+def runner_complete(job_id: int):
+    result = request.get_json(silent=True) or {}
+    if not result.get("status"):
+        return jsonify({"error": "'status' field is required"}), 400
+    conn = _connect()
+    row = conn.execute("SELECT name FROM jobs WHERE id=?", (job_id,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    result["service"] = row["name"]
+    run_id = _insert_run(result)
+    conn = _connect()
+    conn.execute("UPDATE jobs SET status='done', run_id=?, updated=? WHERE id=?", (run_id, time.time(), job_id))
+    conn.commit()
+    conn.close()
+    for key in ("canary", "baseline"):   # artifacts are no longer needed once tested
+        conn = _connect()
+        r = conn.execute(f"SELECT {key} FROM jobs WHERE id=?", (job_id,)).fetchone()
+        conn.execute(f"UPDATE jobs SET {key}=NULL WHERE id=?", (job_id,))
+        conn.commit()
+        conn.close()
+        if r and r[0]:
+            Path(r[0]).unlink(missing_ok=True)
+    _job_event(job_id)
+    return jsonify({"saved": True, "run_id": run_id})
 
 
 # ── Routes — real-time & observability ───────────────────────────────────────

@@ -69,6 +69,15 @@ py pipeline.py --chaos latency
 
 ---
 
+## Test Your Own Service
+
+Upload a zip with a Dockerfile in the dashboard, or press **Healthy release** /
+**Regressed release** for a one-click demo. A runner on your machine builds it in
+minikube, injects chaos into the canary, and posts the verdict back.
+See [docs/TEST_YOUR_OWN_SERVICE.md](docs/TEST_YOUR_OWN_SERVICE.md) for setup, the demo script and the security model.
+
+---
+
 ## Resume Bullet
 
 > Built **Sentinel-X**, an autonomous chaos-driven deployment validation system on Kubernetes (Minikube) using A/A/B canary strategy, Chaos Mesh fault injection, and statistical regression detection — with automated promote/rollback decisions and a live React dashboard on Vercel/Render.
